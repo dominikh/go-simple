@@ -51,6 +51,8 @@ constructs:
 - Don't use `for _ = range x`, use `for range x`
 - Don't use `for true { ... }`, use `for { ... }`
 - Use raw strings with regexp.Compile to avoid two levels of escaping
+- Don't use `x == nil || len(x) == 0`, use `len(x) == 0`
+- Don't use `x != nil && len(x) ...`, use `len(x) ...`
 
 ## gofmt -r
 
