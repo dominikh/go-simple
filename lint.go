@@ -973,8 +973,13 @@ func (f *file) lintRedundantNilCheckWithLen() {
 			return true
 		}
 
+		// avoid false positive for "xx != null && len(xx) == 0"
+		if !eqNil && isZero(y.Y) && y.Op == token.EQL {
+			return true
+		}
+
 		// finally check that xx type is one of array, slice, map or chan
-		// this is mainly to prevent false negative in case if xx is a pointer to an array
+		// this is mainly to prevent false positive in case if xx is a pointer to an array
 		switch f.pkg.typeOf(xx).(type) {
 		case *types.Array, *types.Slice, *types.Map, *types.Chan:
 			// ok
