@@ -176,6 +176,7 @@ func (f *file) lint() {
 	f.lintRanges()
 	f.lintForTrue()
 	f.lintRegexpRaw()
+	f.lintRedundantNilCheckWithLen()
 }
 
 type link string
@@ -442,6 +443,11 @@ func isZero(expr ast.Expr) bool {
 func isOne(expr ast.Expr) bool {
 	lit, ok := expr.(*ast.BasicLit)
 	return ok && lit.Kind == token.INT && lit.Value == "1"
+}
+
+func isNil(expr ast.Expr) bool {
+	id, ok := expr.(*ast.Ident)
+	return ok && id.Name == "nil"
 }
 
 var basicTypeKinds = map[types.BasicKind]string{
@@ -898,6 +904,90 @@ func (f *file) lintRegexpRaw() {
 		}
 
 		f.errorf(call, 1, category("FIXME"), "should use raw string (`...`) with regexp.%s to avoid having to escape twice", sel.Sel.Name)
+		return true
+	}
+	f.walk(fn)
+}
+
+// lintRedundantNilCheckWithLen checks for the following reduntant nil-checks:
+//
+//   if x == nil || len(x) == 0 {}
+//   if x != nil && len(x) ... {  // or any operator len(x) > 0, len(x) != 0, len(x) > 10000
+//
+func (f *file) lintRedundantNilCheckWithLen() {
+	fn := func(node ast.Node) bool {
+		// check that expr is "x || y" or "x && y"
+		expr, ok := node.(*ast.BinaryExpr)
+		if !ok {
+			return true
+		}
+		if expr.Op != token.LOR && expr.Op != token.LAND {
+			return true
+		}
+		eqNil := expr.Op == token.LOR
+
+		// check that x is "xx == nil" or "xx != nil"
+		x, ok := expr.X.(*ast.BinaryExpr)
+		if !ok {
+			return true
+		}
+		if eqNil && x.Op != token.EQL {
+			return true
+		}
+		if !eqNil && x.Op != token.NEQ {
+			return true
+		}
+		xx, ok := x.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		if !isNil(x.Y) {
+			return true
+		}
+
+		// check that y is "len(xx) == 0" or "len(xx) ... "
+		y, ok := expr.Y.(*ast.BinaryExpr)
+		if !ok {
+			return true
+		}
+		if eqNil && y.Op != token.EQL { // must be len(xx) *==* 0
+			return false
+		}
+		yx, ok := y.X.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		yxFun, ok := yx.Fun.(*ast.Ident)
+		if !ok || yxFun.Name != "len" || len(yx.Args) != 1 {
+			return true
+		}
+		yxArg, ok := yx.Args[0].(*ast.Ident)
+		if !ok {
+			return true
+		}
+		if yxArg.Name != xx.Name {
+			return true
+		}
+
+		if eqNil && !isZero(y.Y) { // must be len(x) == *0*
+			return true
+		}
+
+		// avoid false positive for "xx != null && len(xx) == 0"
+		if !eqNil && isZero(y.Y) && y.Op == token.EQL {
+			return true
+		}
+
+		// finally check that xx type is one of array, slice, map or chan
+		// this is mainly to prevent false positive in case if xx is a pointer to an array
+		switch f.pkg.typeOf(xx).(type) {
+		case *types.Array, *types.Slice, *types.Map, *types.Chan:
+			// ok
+		default:
+			return true
+		}
+
+		f.errorf(expr, 1, category("FIXME"), fmt.Sprintf("should use %s; nil check is redundant", f.render(y)))
 		return true
 	}
 	f.walk(fn)
