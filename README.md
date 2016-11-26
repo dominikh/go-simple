@@ -58,6 +58,7 @@ constructs:
 | S1015 | Using `strconv.FormatInt` when `strconv.Atoi` would be more straightforward |                                                                        |
 | S1016 | Converting two struct types by manually copying each field                  | A type conversion: `T(v)`                                              |
 | S1017 | `if strings.HasPrefix` + string slicing                                     | Call `strings.TrimPrefix` unconditionally                              |
+| S1018 | Providing default length or capacity arguments to `make`                    | The length or capacity arguments are redundant                         |
 
 ## gofmt -r
 

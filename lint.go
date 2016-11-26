@@ -33,6 +33,7 @@ var Funcs = map[string]lint.Func{
 	"S1015": LintFormatInt,
 	"S1016": LintSimplerStructConversion,
 	"S1017": LintTrim,
+	"S1018": LintMakeLenCap,
 }
 
 type Checker struct{}
@@ -1269,4 +1270,66 @@ func intLit(f *lint.File, expr ast.Expr) (int64, bool) {
 	}
 	val, _ := constant.Int64Val(tv.Value)
 	return val, true
+}
+
+func LintMakeLenCap(f *lint.File) {
+	fn := func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if fn, ok := call.Fun.(*ast.Ident); !ok || fn.Name != "make" {
+			return true
+		}
+		switch len(call.Args) {
+		case 2:
+			// make(T, len)
+			if length, ok := constantInt(f, call.Args[1]); ok && length == 0 {
+				f.Errorf(call.Args[1], "when length is zero, length can be omitted")
+			}
+		case 3:
+			// make(T, len, cap)
+			lenConst, lenOK := constantInt(f, call.Args[1])
+			capConst, capOK := constantInt(f, call.Args[2])
+			if lenOK && capOK && lenConst == capConst {
+				f.Errorf(call.Args[1], "when length equals capacity, capacity can be omitted")
+				break
+			}
+
+			lenIdent, lenOK := call.Args[1].(*ast.Ident)
+			capIdent, capOK := call.Args[2].(*ast.Ident)
+			if lenOK && capOK && lenIdent.Name == capIdent.Name {
+				f.Errorf(call.Args[1], "when length equals capacity, capacity can be omitted")
+				break
+			}
+
+			lenSel, lenOK := call.Args[1].(*ast.SelectorExpr)
+			capSel, capOK := call.Args[2].(*ast.SelectorExpr)
+			if lenOK && capOK {
+				lenObj := f.Pkg.TypesInfo.ObjectOf(lenSel.Sel)
+				capObj := f.Pkg.TypesInfo.ObjectOf(capSel.Sel)
+				if lenObj != nil && capObj != nil && lenObj.Pos() == capObj.Pos() {
+					f.Errorf(call.Args[1], "when length equals capacity, capacity can be omitted")
+					break
+				}
+			}
+		}
+		return false
+	}
+	f.Walk(fn)
+}
+
+func constantInt(f *lint.File, expr ast.Expr) (int, bool) {
+	tv := f.Pkg.TypesInfo.Types[expr]
+	if tv.Value == nil {
+		return 0, false
+	}
+	if tv.Value.Kind() != constant.Int {
+		return 0, false
+	}
+	v, ok := constant.Int64Val(tv.Value)
+	if !ok {
+		return 0, false
+	}
+	return int(v), true
 }
