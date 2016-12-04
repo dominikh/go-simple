@@ -1284,7 +1284,7 @@ func LintMakeLenCap(f *lint.File) {
 		switch len(call.Args) {
 		case 2:
 			// make(T, len)
-			if _, ok := call.Args[0].(*ast.ArrayType); ok {
+			if _, ok := f.Pkg.TypesInfo.TypeOf(call.Args[0]).Underlying().(*types.Slice); ok {
 				break
 			}
 			if length, ok := call.Args[1].(*ast.BasicLit); ok && length.Value == "0" {
