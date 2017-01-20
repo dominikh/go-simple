@@ -33,6 +33,7 @@ var Funcs = map[string]lint.Func{
 	"S1015": LintFormatInt,
 	"S1016": LintSimplerStructConversion,
 	"S1017": LintTrim,
+	"S1018": LintMakeLenCap,
 }
 
 type Checker struct{}
@@ -1279,4 +1280,33 @@ func intLit(f *lint.File, expr ast.Expr) (int64, bool) {
 	}
 	val, _ := constant.Int64Val(tv.Value)
 	return val, true
+}
+
+func LintMakeLenCap(f *lint.File) {
+	fn := func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if fn, ok := call.Fun.(*ast.Ident); !ok || fn.Name != "make" {
+			return true
+		}
+		switch len(call.Args) {
+		case 2:
+			// make(T, len)
+			if _, ok := f.Pkg.TypesInfo.TypeOf(call.Args[0]).Underlying().(*types.Slice); ok {
+				break
+			}
+			if length, ok := call.Args[1].(*ast.BasicLit); ok && length.Value == "0" {
+				f.Errorf(call.Args[1], "when length is zero, length can be omitted")
+			}
+		case 3:
+			// make(T, len, cap)
+			if f.Render(call.Args[1]) == f.Render(call.Args[2]) {
+				f.Errorf(call.Args[1], "when length equals capacity, capacity can be omitted")
+			}
+		}
+		return false
+	}
+	f.Walk(fn)
 }
